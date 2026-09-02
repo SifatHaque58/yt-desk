@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>yt-desk</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="mast">
+    <button type="button" class="brand" id="go_home" title="Home">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path fill="#fff" d="M8 5v14l11-7z"/></svg>
+      </span>
+      <span class="word">yt-desk</span>
+    </button>
+
+    <form class="search" id="search_form" autocomplete="off" role="search">
+      <input id="q" type="search" placeholder="Search" enterkeyhint="search" />
+      <button type="submit" class="search-go" aria-label="Search">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 5 1.49-1.49-5-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+      </button>
+      <ul id="suggest" hidden></ul>
+    </form>
+
+    <div class="mast-right">
+      <label class="country-wrap">
+        <span class="sr">Country</span>
+        <select id="country" title="Market YouTube should rank for"></select>
+      </label>
+      <div class="vpn" id="vpn">
+        <button id="vpn_toggle" type="button" class="vpn-btn" disabled>VPN</button>
+        <button id="vpn_info" type="button" class="vpn-chip" title="Re-check the exit YouTube sees">
+          <span class="vpn-dot" id="vpn_dot"></span>
+          <span class="vpn-text" id="vpn_text">checking</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <p class="toast" id="geo" hidden></p>
+  <p class="toast warn" id="vpn_warn" hidden></p>
+
+  <main>
+    <section id="view_home" class="view">
+      <div class="view-head">
+        <div>
+          <h2 id="home_title">Home</h2>
+          <p class="muted" id="home_note"></p>
+        </div>
+      </div>
+      <div id="home_grid" class="grid"></div>
+      <button type="button" class="more" id="home_more" hidden>Show more</button>
+    </section>
+
+    <section id="view_search" class="view" hidden>
+      <div class="view-head">
+        <h2 id="search_title">Search</h2>
+        <label class="filter">Upload date
+          <select id="uploaded">
+            <option value="">Any time</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="year">This year</option>
+            <option value="latest">Latest</option>
+          </select>
+        </label>
+      </div>
+      <div id="search_grid" class="grid"></div>
+      <button type="button" class="more" id="search_more" hidden>Show more</button>
+    </section>
+
+    <section id="view_watch" class="view watch" hidden>
+      <div class="player-col">
+        <div class="player">
+          <iframe id="player" title="Player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        </div>
+        <h1 id="watch_title"></h1>
+        <div class="owner-row">
+          <div class="avatar" id="watch_avatar" aria-hidden="true"></div>
+          <div class="owner-meta">
+            <p class="channel" id="watch_channel"></p>
+            <p class="muted" id="watch_subs"></p>
+          </div>
+          <a class="yt-open" id="watch_on_yt" href="#" target="_blank" rel="noopener">Watch on YouTube</a>
+          <div class="stats" id="watch_stats"></div>
+        </div>
+        <p class="muted player-hint" id="player_hint" hidden></p>
+        <button type="button" class="desc" id="watch_desc" hidden></button>
+      </div>
+      <aside class="rail">
+        <h3>Up next</h3>
+        <p class="muted rail-note">Ranked for this exit, not the player.</p>
+        <div id="related"></div>
+        <button type="button" class="more" id="related_more" hidden>Show more</button>
+      </aside>
+    </section>
+  </main>
+
+  <p class="err" id="err" hidden></p>
+  <script src="/static/app.js"></script>
+</body>
+</html>

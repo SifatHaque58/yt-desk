@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+data/*.json
+data/*.pid
+data/routing-on
+tun-proxy.log
