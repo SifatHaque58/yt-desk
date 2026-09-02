@@ -111,8 +111,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
   gap: 24px 16px;
 }
 .card {
-  cursor: pointer; background: none; border: 0; color: inherit;
-  text-align: left; padding: 0; border-radius: var(--radius);
+  display: block; cursor: pointer; background: none; border: 0; color: inherit;
+  text-align: left; padding: 0; border-radius: var(--radius); text-decoration: none;
 }
 .card:hover .thumb { transform: scale(1.02); }
 .card:focus-visible { outline: 2px solid #3ea6ff; outline-offset: 3px; }
@@ -195,6 +195,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
   display: grid; grid-template-columns: 168px 1fr; gap: 8px;
   background: none; border: 0; color: inherit; text-align: left;
   padding: 0 0 8px; cursor: pointer; width: 100%; border-radius: 8px;
+  text-decoration: none;
 }
 .rail-item:hover { background: transparent; }
 .rail-item:hover .thumb { transform: scale(1.03); }

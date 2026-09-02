@@ -70,27 +70,33 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function watchHref(id) {
+  return `/?v=${encodeURIComponent(id)}`;
+}
+
 function videoCard(v) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "card";
-  btn.innerHTML = `${thumbBlock(v)}<h3></h3><p></p>`;
-  btn.querySelector("h3").textContent = v.title || v.video_id;
-  btn.querySelector("p").textContent = cardMeta(v);
-  btn.addEventListener("click", () => openWatch(v.video_id));
-  return btn;
+  const a = document.createElement("a");
+  a.className = "card";
+  a.href = watchHref(v.video_id);
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.innerHTML = `${thumbBlock(v)}<h3></h3><p></p>`;
+  a.querySelector("h3").textContent = v.title || v.video_id;
+  a.querySelector("p").textContent = cardMeta(v);
+  return a;
 }
 
 function railItem(v) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "rail-item";
-  btn.innerHTML = `${thumbBlock(v, { rail: true })}<div><h4></h4><p></p></div>`;
-  btn.querySelector("h4").textContent = v.title || v.video_id;
+  const a = document.createElement("a");
+  a.className = "rail-item";
+  a.href = watchHref(v.video_id);
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.innerHTML = `${thumbBlock(v, { rail: true })}<div><h4></h4><p></p></div>`;
+  a.querySelector("h4").textContent = v.title || v.video_id;
   const bits = [v.channel, views(v.views), v.published].filter(Boolean);
-  btn.querySelector("p").textContent = bits.join(" · ");
-  btn.addEventListener("click", () => openWatch(v.video_id));
-  return btn;
+  a.querySelector("p").textContent = bits.join(" · ");
+  return a;
 }
 
 function renderStats(v) {
