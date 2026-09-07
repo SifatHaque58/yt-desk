@@ -71,16 +71,57 @@ def txt(obj: Any) -> str:
     return ""
 
 
+_BIDI_RE = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c\u2060\u200b]")
+_HANDLE_PREFIX_RE = re.compile(r"^@\S+\s*[•·|,]\s*")
+
+
 def _normalize_count_text(s: str) -> str:
-    return (
+    text = _BIDI_RE.sub(
+        "",
         str(s)
         .replace("\xa0", " ")
         .replace("\u202f", " ")
         .replace("\u2009", " ")
         .replace("\u2007", " ")
         .replace("’", "'")
-        .replace("′", "'")
+        .replace("′", "'"),
     )
+    return text
+
+
+def parse_count(s: Optional[str]) -> Optional[int]:
+    """Parse a YouTube count in EN/FR/AR/ES/PT compact form.
+
+    French InnerTube uses a decimal comma (`1,92 k abonnés` = 1,920) and
+    `mille`/`millions`. Do not strip commas first — that turned 1,92k into 192k.
+    Handles (`@name1Msubscribers`) are not counts. `@handle • 179 ألف مشترك`
+    is — peel the handle, then parse.
+    """
+    if not s:
+        return None
+    text = _normalize_count_text(s).strip()
+    if text.startswith("@"):
+        peeled = _HANDLE_PREFIX_RE.sub("", text, count=1)
+        if peeled == text:
+            return None
+        text = peeled
+    m = _COUNT_RE.search(text)
+    if not m:
+        m2 = re.search(r"(\d+)", text.replace(" ", ""))
+        return int(m2.group(1)) if m2 else None
+    n = _to_float(m.group(1))
+    if n is None:
+        return None
+    suf = (m.group(2) or "").strip()
+    if suf:
+        key = suf.lower()
+        key_cf = suf.casefold()
+        mult = _COUNT_MULT.get(key) or _COUNT_MULT.get(key_cf) or _COUNT_MULT.get(suf)
+        if not mult and len(suf) == 1:
+            mult = _COUNT_MULT.get(suf.upper()) or _COUNT_MULT.get(suf.lower())
+        if mult:
+            n *= mult
+    return int(n)
 
 
 def _to_float(num: str) -> Optional[float]:
@@ -108,37 +149,6 @@ def _to_float(num: str) -> Optional[float]:
         return float(raw)
     except ValueError:
         return None
-
-
-def parse_count(s: Optional[str]) -> Optional[int]:
-    """Parse a YouTube count in EN/FR/AR/ES/PT compact form.
-
-    French InnerTube uses a decimal comma (`1,92 k abonnés` = 1,920) and
-    `mille`/`millions`. Do not strip commas first — that turned 1,92k into 192k.
-    Handles (`@name1Msubscribers`) are not counts.
-    """
-    if not s:
-        return None
-    text = _normalize_count_text(s)
-    if text.lstrip().startswith("@"):
-        return None
-    m = _COUNT_RE.search(text)
-    if not m:
-        m2 = re.search(r"(\d+)", text.replace(" ", ""))
-        return int(m2.group(1)) if m2 else None
-    n = _to_float(m.group(1))
-    if n is None:
-        return None
-    suf = (m.group(2) or "").strip()
-    if suf:
-        key = suf.lower()
-        key_cf = suf.casefold()
-        mult = _COUNT_MULT.get(key) or _COUNT_MULT.get(key_cf) or _COUNT_MULT.get(suf)
-        if not mult and len(suf) == 1:
-            mult = _COUNT_MULT.get(suf.upper()) or _COUNT_MULT.get(suf.lower())
-        if mult:
-            n *= mult
-    return int(n)
 
 
 def find_token(obj: Any) -> Optional[str]:
@@ -702,12 +712,25 @@ _VIEWS_RE = re.compile(
     r"ditonton|tontonan|penonton|ملاحظات|بار دیکھا",
     re.I,
 )
+_DATEISH_RE = re.compile(
+    r"\bago\b|il y a|قبل |منذ |hours?|days?|weeks?|months?|years?",
+    re.I,
+)
 
 
 def _lockup_part_text(part: Any) -> str:
     if not isinstance(part, dict):
         return ""
     return txt(part.get("text")) or str(part.get("accessibilityLabel") or "")
+
+
+def _lockup_part_blob(part: Any) -> str:
+    """Visible text plus accessibility label — related cards split them."""
+    if not isinstance(part, dict):
+        return _lockup_part_text(part)
+    visible = txt(part.get("text"))
+    a11y = str(part.get("accessibilityLabel") or "")
+    return f"{visible} {a11y}".strip()
 
 
 def _lockup_channel(lv: dict) -> tuple[str, Optional[str], Optional[int], str]:
@@ -725,20 +748,26 @@ def _lockup_channel(lv: dict) -> tuple[str, Optional[str], Optional[int], str]:
     for row in rows:
         for p in as_list(row.get("metadataParts") if isinstance(row, dict) else None):
             tx = _lockup_part_text(p)
-            if not tx:
+            blob = _lockup_part_blob(p)
+            if not tx and not blob:
                 continue
-            if _VIEWS_RE.search(tx):
-                n = parse_count(tx)
+            if _VIEWS_RE.search(blob):
+                n = parse_count(tx) or parse_count(blob)
                 if n is not None:
                     views = n
                 continue
-            if recency_days(tx) is not None or re.search(
-                r"\bago\b|il y a|قبل |منذ |hours?|days?|weeks?|months?|years?",
-                tx,
-                re.I,
-            ):
-                published = published or tx
+            if recency_days(tx or blob) is not None or _DATEISH_RE.search(tx or blob):
+                published = published or tx or blob
                 continue
+            # Unlabeled compact count (`30 ألف`, `12K`) is views. Do not use a
+            # magnitude letter anywhere in the string — that turned
+            # `Zawba3a Tech` into views because of the `3` and the `b`.
+            counted = _COUNT_RE.search(tx or "")
+            if counted and counted.group(2) and views is None:
+                n = parse_count(tx)
+                if n is not None:
+                    views = n
+                    continue
             if not name:
                 name = tx
     cid = None
@@ -824,7 +853,11 @@ def related_videos(data: Any) -> list[dict]:
                 add(_from_compact(o.get("compactVideoRenderer") or {}))
             if "endScreenVideoRenderer" in o:
                 add(_from_compact(o.get("endScreenVideoRenderer") or {}))
-            for v in o.values():
+            for k, v in o.items():
+                # Keep playerOverlays: end-screen cards are a fallback when
+                # secondaryResults is empty. Skip comments / engagement shelves.
+                if k in _SKIP_RELATED and k != "playerOverlays":
+                    continue
                 rec(v)
         elif isinstance(o, list):
             for v in o:
@@ -935,32 +968,32 @@ for _tokens, _per in (
         "segundo segundos minuto minutos hora horas "
         "detik menit minit jam "
         "ثانية ثوان ثواني دقيقة دقائق ساعة ساعات "
-        "سیکنڈ منٹ گھنٹہ گھنٹے گھنٹوں",
+        "سیکنڈ منٹ گھنٹہ گھنٹے گھنٹوں ",
         0,
     ),
     (
         "day days jour jours día días dia dias hari "
         "يوم أيام ايام "
-        "دن دنوں روز",
+        "دن دنوں روز ",
         1,
     ),
     (
         "week weeks semaine semaines semana semanas minggu "
         "أسبوع اسبوع أسابيع اسابيع "
-        "ہفتہ ہفتے ہفتوں",
+        "ہفتہ ہفتے ہفتوں ",
         7,
     ),
     (
         "month months mois mes meses mês bulan "
         "شهر أشهر اشهر شهور "
-        "مہینہ مہینے مہینوں ماہ",
+        "مہینہ مہینے مہینوں ماہ ",
         30,
     ),
     (
         "year years an ans année années annee annees "
         "año años ano anos tahun "
         "سنة سنوات سنين عام أعوام اعوام "
-        "سال سالوں برس",
+        "سال سالوں برس ",
         365,
     ),
 ):
@@ -1019,6 +1052,26 @@ def recency_days(published: Optional[str]) -> Optional[int]:
     return int(m.group(1)) * _UNIT_DAYS[m.group(2)]
 
 
+UPLOAD_FLOOR_DAYS = {"week": 7, "month": 31, "year": 366}
+
+
+def apply_upload_floor(videos: list[dict], uploaded: Optional[str]) -> list[dict]:
+    """Drop cards older than InnerTube's upload-date window.
+
+    WEB still leaks month-old rows into `EgQIAxAB` (this week) for some
+    queries. Unknown dates stay — recency_days None means we cannot tell.
+    """
+    floor = UPLOAD_FLOOR_DAYS.get(uploaded or "")
+    if not floor:
+        return videos
+    out = []
+    for v in videos:
+        age = recency_days(v.get("published"))
+        if age is None or age <= floor:
+            out.append(v)
+    return out
+
+
 def walk_videos(data: Any) -> list[dict]:
     """Flat video cards from search, trending, or home. Deduped by video id."""
     videos, _ = walk_search(data if isinstance(data, dict) else {})
@@ -1051,6 +1104,84 @@ def _views_from_watch(r: dict) -> Optional[int]:
         if n is not None:
             return n
     return parse_count(txt(vc)) if vc is not None else None
+
+
+def _first_uc_id(obj: Any) -> Optional[str]:
+    found: list[str] = []
+
+    def rec(o: Any) -> None:
+        if found:
+            return
+        if isinstance(o, dict):
+            cid = _uc_id(o.get("browseId")) or _uc_id(o.get("channelId"))
+            if cid:
+                found.append(cid)
+                return
+            for v in o.values():
+                rec(v)
+        elif isinstance(o, list):
+            for v in o:
+                rec(v)
+
+    rec(obj)
+    return found[0] if found else None
+
+
+def _first_subscriber_count(obj: Any) -> Optional[int]:
+    found: list[int] = []
+
+    def rec(o: Any) -> None:
+        if found:
+            return
+        if isinstance(o, dict):
+            for key in ("subscriberCountText", "subtitle", "accessibilityText"):
+                raw = txt(o.get(key))
+                if raw and _SUB_WORD_RE.search(raw):
+                    n = parse_count(raw)
+                    if n is not None:
+                        found.append(n)
+                        return
+            if isinstance(o.get("content"), str) and _SUB_WORD_RE.search(o["content"]):
+                n = parse_count(o["content"])
+                if n is not None:
+                    found.append(n)
+                    return
+            for v in o.values():
+                rec(v)
+        elif isinstance(o, list):
+            for v in o:
+                rec(v)
+
+    rec(obj)
+    return found[0] if found else None
+
+
+def _first_list_item_title(obj: Any) -> str:
+    found: list[str] = []
+
+    def rec(o: Any) -> None:
+        if found:
+            return
+        if isinstance(o, dict):
+            item = o.get("listItemViewModel")
+            if isinstance(item, dict):
+                name = txt(item.get("title"))
+                if name:
+                    found.append(name)
+                    return
+            for v in o.values():
+                rec(v)
+        elif isinstance(o, list):
+            for v in o:
+                rec(v)
+
+    rec(obj)
+    return found[0] if found else ""
+
+
+def is_empty_watch(info: dict, related: Optional[list] = None) -> bool:
+    """True when /next did not resolve a real watch page."""
+    return not (info.get("title") or "").strip() and not (related or [])
 
 
 def watch_info(data: Any) -> dict:
@@ -1092,13 +1223,22 @@ def watch_info(data: Any) -> dict:
         nonlocal channel, channel_id, subscribers
         if not isinstance(owner, dict):
             return
-        channel = channel or txt(owner.get("title"))
+        channel = (
+            channel
+            or txt(owner.get("title"))
+            or _first_list_item_title(owner)
+            or txt(owner.get("attributedTitle"))
+        )
         runs = as_list((owner.get("title") or {}).get("runs"))
         if runs and isinstance(runs[0], dict):
             browse = (runs[0].get("navigationEndpoint") or {}).get("browseEndpoint") or {}
             channel_id = channel_id or browse.get("browseId")
             channel = channel or runs[0].get("text") or channel
-        subscribers = subscribers if subscribers is not None else parse_count(txt(owner.get("subscriberCountText")))
+        channel_id = channel_id or _first_uc_id(owner)
+        if subscribers is None:
+            subscribers = parse_count(txt(owner.get("subscriberCountText")))
+        if subscribers is None:
+            subscribers = _first_subscriber_count(owner)
 
     rec(data)
     payload = data if isinstance(data, dict) else {}

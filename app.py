@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from desk import session as sess
 from desk import tunnel
 from desk.countries import COUNTRIES, get as get_country
+from desk.parse import is_empty_watch
 from desk.yt import YT, YTError
 
 ROOT = Path(__file__).resolve().parent
@@ -225,6 +226,8 @@ def watch(video_id: str, continuation: str | None = None) -> JSONResponse:
         return JSONResponse({"error": "invalid video id"}, status_code=400)
     try:
         out = _run_yt(lambda yt: yt.watch(video_id, continuation=continuation or None))
+        if not continuation and is_empty_watch(out.get("video") or {}, out.get("related") or []):
+            return JSONResponse({"error": "video not found"}, status_code=404)
         return JSONResponse(out)
     except YTError as exc:
         return _fail(exc)
