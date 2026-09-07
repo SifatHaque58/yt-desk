@@ -102,9 +102,59 @@ If PIA is carrying the whole machine, the header warns. Split it if you want git
 1. Pick a country. Set VPN on if you have an exit YouTube agrees is that market.
 2. Home is this week’s ranked news (or trending) until you watch 3 videos in that country; then it asks For You.
 3. Search like YouTube. Typeahead, upload-date filter, infinite scroll.
+   Show more walks YouTube's own search continuations, so it ends where
+   YouTube's results end — see [Search depth](#search-depth).
 4. Watch: embed on the left, **Up next from `/next` through the tunnel** on the right. Views, likes, comments, and subs come from that same call.
 
 A sticky anonymous `visitorData` is stored per country in `data/session.json` (not committed).
+
+### Search depth
+
+Search is not an index scan. Show more pages the same SERP a browser gets, and
+YouTube's continuations run out: past roughly four pages they start re-serving
+rows already on screen, and some pages are nothing but a Shorts shelf. Measured
+on `how to cook`, `gl=MA`: about 90 unique videos across eight pages, the last
+two entirely recycled.
+
+So the desk drops rows it has already shown, walks up to three continuations
+looking for new ones, and then says the query is exhausted instead of leaving a
+button that does nothing. Shorts shelves are parsed too — they carry no byline
+(YouTube does not attribute Shorts in search), so those cards show the channel
+only once opened.
+
+To reach different creators, change the query or the upload window. The same
+keyword will not go deeper.
+
+### Translated titles
+
+YouTube serves *multi-language titles*: a channel can attach a title track per
+language, and InnerTube hands back whichever one matches `hl`. In a `hl=ar`
+market that means Joshua Weissman's "Learn How To Cook in Under 25 Minutes"
+arrives as "تعلم الطبخ في أقل من ٢٥ دقيقة" — a US channel reading as an Arab one.
+There is no `hl` that means "do not translate"; the only lever is which language
+you ask in.
+
+The header's title picker chooses:
+
+| Mode | `hl` sent | Titles |
+|---|---|---|
+| **Original titles** (default) | `is` | What the creator typed. |
+| **Local titles** | market language | Exactly what a local viewer sees, translations and all. |
+
+Icelandic is not a typo. `hl` selects a title *track*, so asking in `en` just
+serves the English one — a Moroccan channel that uploaded an English title then
+reads as English, which is the same bug pointing the other way. Icelandic has
+effectively no title tracks, so YouTube falls back to the creator's own title on
+every row. Checked against `zu` and `sw` across 95 videos: all three agree on
+every title, which is what "no track exists, this is the original" looks like.
+
+The cost is that dates arrive in Icelandic too. `desk/parse.py` reads them (the
+`_UNIT_DAYS` Icelandic tokens) so the upload-date floor still works, and
+`display_published` renders them back to English before they reach the page.
+
+`gl`, the exit IP and the sticky `visitorData` do not change with this, so
+ranking is the same either way — only the label on each row moves. The
+market language still drives cold-start news search and typeahead in both modes.
 
 ---
 
@@ -116,7 +166,7 @@ All YouTube traffic from these routes uses the InnerTube client + proxy.
 |---|---|---|
 | `GET` | `/` | UI |
 | `GET` | `/api/countries` | Locale list |
-| `GET` / `POST` | `/api/session` | `{gl}` |
+| `GET` / `POST` | `/api/session` | `{gl, titles}` |
 | `GET` | `/api/proxy?check=true` | Tunnel + measured YouTube country |
 | `POST` | `/api/proxy/start` · `/stop` | Loopback CONNECT proxy |
 | `GET` | `/api/suggest?q=` | Typeahead |
@@ -159,6 +209,8 @@ No live YouTube in CI. Against a running desk, smoke search / watch / related th
 - Unofficial InnerTube. WEB payloads move; parsers are defensive.
 - PIA region ≠ YouTube market. Measure before trusting a run.
 - Anonymous For You is not a logged-in account feed.
+- Search depth is YouTube's, roughly 90 videos per query per market. More pages is not more reach.
+- Original titles hides YouTube's translations; it does not tell you a channel's country. A channel that uploads only Arabic titles still may not be based in the market.
 - Embed geo and InnerTube geo are different on purpose when PIA is split.
 - Same ToS posture as the scout: local metadata client, no streams, no scraping-at-scale claims.
 

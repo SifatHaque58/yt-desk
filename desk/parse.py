@@ -279,6 +279,10 @@ def walk_search(data: dict) -> tuple[list[dict], list[dict]]:
                 item = _from_compact(o.get("gridVideoRenderer") or {})
                 if item and item.get("video_id"):
                     videos.append(item)
+            if "shortsLockupViewModel" in o:
+                item = _from_shorts_lockup(o.get("shortsLockupViewModel") or {})
+                if item:
+                    videos.append(item)
             for v in o.values():
                 rec(v)
         elif isinstance(o, list):
@@ -831,6 +835,37 @@ def _from_compact(r: dict) -> Optional[dict]:
     }
 
 
+def _from_shorts_lockup(lv: dict) -> Optional[dict]:
+    """A Shorts shelf item.
+
+    Whole search continuations come back as nothing but a Shorts shelf. Without
+    this the page parses to zero rows and Show more looks broken. The lockup
+    carries no byline -- YouTube does not attribute Shorts in search -- so the
+    channel stays blank until the row is opened and `/next` fills it in.
+    """
+    if not isinstance(lv, dict):
+        return None
+    tap = (lv.get("onTap") or {}).get("innertubeCommand") or {}
+    vid = (tap.get("reelWatchEndpoint") or {}).get("videoId")
+    if not isinstance(vid, str) or len(vid) != 11:
+        vid = _video_id_from(lv)
+    if not vid:
+        return None
+    meta = lv.get("overlayMetadata") or {}
+    primary = (meta.get("primaryText") or {}).get("content") or ""
+    secondary = (meta.get("secondaryText") or {}).get("content") or ""
+    return {
+        "video_id": vid,
+        "title": primary or txt(lv.get("accessibilityText")).split(",")[0],
+        "channel": "",
+        "channel_id": None,
+        "views": parse_count(secondary),
+        "published": "",
+        "length": "",
+        "is_short": True,
+    }
+
+
 def related_videos(data: Any) -> list[dict]:
     """Watch Next / end-screen video cards with channel ids."""
     out: list[dict] = []
@@ -968,32 +1003,37 @@ for _tokens, _per in (
         "segundo segundos minuto minutos hora horas "
         "detik menit minit jam "
         "ثانية ثوان ثواني دقيقة دقائق ساعة ساعات "
-        "سیکنڈ منٹ گھنٹہ گھنٹے گھنٹوں ",
+        "سیکنڈ منٹ گھنٹہ گھنٹے گھنٹوں "
+        "sekúndu sekúndum mínútu mínútum klukkustund klukkustundum",
         0,
     ),
     (
         "day days jour jours día días dia dias hari "
         "يوم أيام ايام "
-        "دن دنوں روز ",
+        "دن دنوں روز "
+        "dag degi dögum",
         1,
     ),
     (
         "week weeks semaine semaines semana semanas minggu "
         "أسبوع اسبوع أسابيع اسابيع "
-        "ہفتہ ہفتے ہفتوں ",
+        "ہفتہ ہفتے ہفتوں "
+        "viku vikum",
         7,
     ),
     (
         "month months mois mes meses mês bulan "
         "شهر أشهر اشهر شهور "
-        "مہینہ مہینے مہینوں ماہ ",
+        "مہینہ مہینے مہینوں ماہ "
+        "mánuður mánuði mánuðum",
         30,
     ),
     (
         "year years an ans année années annee annees "
         "año años ano anos tahun "
         "سنة سنوات سنين عام أعوام اعوام "
-        "سال سالوں برس ",
+        "سال سالوں برس "
+        "ári árum",
         365,
     ),
 ):
@@ -1050,6 +1090,51 @@ def recency_days(published: Optional[str]) -> Optional[int]:
     if not m:
         return None
     return int(m.group(1)) * _UNIT_DAYS[m.group(2)]
+
+
+# Original-title mode asks InnerTube in a locale no creator uploads a title
+# track for, so YouTube falls back to the title the creator typed. The cost is
+# that every *other* string comes back in that locale too. Ages are parsed above
+# (see the Icelandic tokens in `_UNIT_DAYS`); this puts them back into English
+# for display so the desk never shows a date the user cannot read.
+_IS_UNITS = {
+    "sekúndu": "second", "sekúndum": "second",
+    "mínútu": "minute", "mínútum": "minute",
+    "klukkustund": "hour", "klukkustundum": "hour",
+    "dag": "day", "degi": "day", "dögum": "day",
+    "viku": "week", "vikum": "week",
+    "mánuður": "month", "mánuði": "month", "mánuðum": "month",
+    "ári": "year", "árum": "year",
+}
+_IS_AGE_RE = re.compile(
+    r"(?:(Streymt)\s+)?fyrir\s+(\d+)\s+("
+    + "|".join(sorted(_IS_UNITS, key=len, reverse=True))
+    + r")",
+    re.IGNORECASE,
+)
+
+
+def display_published(text: Optional[str]) -> str:
+    """Render a relative date in English. No-op for locales already readable."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    m = _IS_AGE_RE.search(t)
+    if not m:
+        return t
+    live, n, unit = m.group(1), m.group(2), m.group(3).lower()
+    word = _IS_UNITS.get(unit, unit)
+    plural = "" if n == "1" else "s"
+    out = f"{n} {word}{plural} ago"
+    return f"Streamed {out}" if live else out
+
+
+def localize_rows(rows: list[dict]) -> list[dict]:
+    """Rewrite `published` on parsed video rows for display."""
+    for row in rows or []:
+        if isinstance(row, dict) and row.get("published"):
+            row["published"] = display_published(row["published"])
+    return rows
 
 
 UPLOAD_FLOOR_DAYS = {"week": 7, "month": 31, "year": 366}

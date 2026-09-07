@@ -31,6 +31,13 @@
         <span class="sr">Country</span>
         <select id="country" title="Market YouTube should rank for"></select>
       </label>
+      <label class="titles-wrap" title="YouTube serves a US channel's video under an Arabic title when asked in Arabic. Original shows the title the creator typed.">
+        <span class="sr">Titles</span>
+        <select id="titles">
+          <option value="original">Original titles</option>
+          <option value="native">Local titles</option>
+        </select>
+      </label>
       <div class="vpn" id="vpn">
         <button id="vpn_toggle" type="button" class="vpn-btn" disabled>VPN</button>
         <button id="vpn_info" type="button" class="vpn-chip" title="Re-check the exit YouTube sees">
@@ -54,6 +61,7 @@
       </div>
       <div id="home_grid" class="grid"></div>
       <button type="button" class="more" id="home_more" hidden>Show more</button>
+      <p class="end" id="home_end" hidden></p>
     </section>
 
     <section id="view_search" class="view" hidden>
@@ -71,6 +79,7 @@
       </div>
       <div id="search_grid" class="grid"></div>
       <button type="button" class="more" id="search_more" hidden>Show more</button>
+      <p class="end" id="search_end" hidden></p>
     </section>
 
     <section id="view_watch" class="view watch" hidden>

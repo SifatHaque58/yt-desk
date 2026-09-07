@@ -56,9 +56,9 @@ def _client() -> YT:
     global _yt, _yt_key
     state = sess.current()
     proxy = tunnel.proxy_url()
-    key = f"{state['hl']}|{state['gl']}|{proxy}"
+    key = f"{state['hl']}|{state['ui_hl']}|{state['gl']}|{proxy}"
     if _yt is None or _yt_key != key:
-        yt = YT(state["hl"], state["gl"])
+        yt = YT(state["hl"], state["gl"], ui_language=state["ui_hl"])
         yt.set_visitor(sess.visitor_for(state["gl"]))
         _yt = yt
         _yt_key = key
@@ -101,6 +101,8 @@ def session_get() -> JSONResponse:
         {
             "gl": gl,
             "hl": state["hl"],
+            "ui_hl": state["ui_hl"],
+            "titles": state["titles"],
             "name": country["name"],
             "watches": sess.watch_count(gl),
             "home_ready": sess.watch_count(gl) >= HOME_AFTER_WATCHES,
@@ -110,8 +112,12 @@ def session_get() -> JSONResponse:
 
 @app.post("/api/session")
 def session_set(body: dict | None = None) -> JSONResponse:
-    code = str((body or {}).get("gl") or "")
-    sess.set_country(code)
+    body = body or {}
+    code = str(body.get("gl") or "")
+    if code:
+        sess.set_country(code)
+    if body.get("titles") is not None:
+        sess.set_titles(str(body.get("titles")))
     return session_get()
 
 

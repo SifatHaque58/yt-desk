@@ -4,6 +4,13 @@ let homeToken = null;
 let homeSource = "news";
 let homeQuery = "news";
 let searchToken = null;
+// YouTube's search continuations run out long before the button does: past
+// roughly four pages they start re-serving rows already on screen. Track what
+// is already rendered so a recycled page is dropped instead of appended, and
+// so Show more can tell "nothing new" from "not loaded yet".
+let searchSeen = new Set();
+let homeSeen = new Set();
+const MORE_HOPS = 3;
 let relatedToken = null;
 let currentVideo = "";
 let suggestTimer = 0;
@@ -52,11 +59,32 @@ function views(n) {
 }
 
 function cardMeta(v) {
-  return [v.channel, v.published].filter(Boolean).join(" · ");
+  // Shorts shelves carry no byline in search -- YouTube does not send one.
+  const who = v.channel || (v.is_short ? "Channel shown on open" : "");
+  return [who, v.published].filter(Boolean).join(" · ");
+}
+
+// Append only rows not already on screen. Returns how many actually landed.
+function appendNew(grid, videos, seen) {
+  let added = 0;
+  for (const v of videos || []) {
+    if (!v.video_id || seen.has(v.video_id)) continue;
+    seen.add(v.video_id);
+    grid.appendChild(videoCard(v));
+    added += 1;
+  }
+  return added;
+}
+
+function endNote(id, text) {
+  const el = $(id);
+  el.textContent = text || "";
+  el.hidden = !text;
 }
 
 function thumbBlock(v, { rail = false } = {}) {
   const badges = [];
+  if (v.is_short) badges.push(`<span class="short-badge">Short</span>`);
   if (!rail && v.views != null) badges.push(`<span class="views-badge">${views(v.views)}</span>`);
   if (v.length) badges.push(`<span class="len-badge">${escapeHtml(v.length)}</span>`);
   return `<span class="thumb-wrap"><img class="thumb" alt="" src="${thumb(v.video_id)}" />${badges.join("")}</span>`;
@@ -171,6 +199,7 @@ async function loadCountries() {
     sel.appendChild(opt);
   }
   sel.value = session.gl;
+  $("titles").value = session.titles || "original";
 }
 
 async function loadHome() {
@@ -198,9 +227,11 @@ async function loadHome() {
           ? `Trending here. Watch ${Math.max(0, need - n)} more to try For You.`
           : `What’s circulating this week. Watch ${Math.max(0, need - n)} more, then Home will ask For You.`;
     grid.innerHTML = "";
+    homeSeen = new Set();
+    endNote("home_end", "");
     const videos = data.videos || [];
     if (!videos.length) grid.appendChild(emptyBox("Nothing ranked for this exit yet. Try a search."));
-    for (const v of videos) grid.appendChild(videoCard(v));
+    appendNew(grid, videos, homeSeen);
     homeToken = data.continuation || null;
     $("home_more").hidden = !homeToken;
   } catch (err) {
@@ -212,22 +243,27 @@ async function loadHome() {
 async function moreHome() {
   if (!homeToken) return;
   $("home_more").disabled = true;
+  endNote("home_end", "");
   try {
-    let data;
-    if (homeSource === "trending") {
-      data = await jsonPost("/api/trending", { continuation: homeToken });
-    } else if (homeSource === "news") {
-      data = await jsonPost("/api/search", {
-        q: homeQuery,
-        uploaded: "week",
-        continuation: homeToken,
-      });
-    } else {
-      data = await jsonPost("/api/home", { continuation: homeToken });
+    let added = 0;
+    for (let hop = 0; hop < MORE_HOPS && homeToken && !added; hop += 1) {
+      let data;
+      if (homeSource === "trending") {
+        data = await jsonPost("/api/trending", { continuation: homeToken });
+      } else if (homeSource === "news") {
+        data = await jsonPost("/api/search", {
+          q: homeQuery,
+          uploaded: "week",
+          continuation: homeToken,
+        });
+      } else {
+        data = await jsonPost("/api/home", { continuation: homeToken });
+      }
+      added += appendNew($("home_grid"), data.videos, homeSeen);
+      homeToken = data.continuation || null;
     }
-    for (const v of data.videos || []) $("home_grid").appendChild(videoCard(v));
-    homeToken = data.continuation || null;
-    $("home_more").hidden = !homeToken;
+    $("home_more").hidden = !homeToken || !added;
+    if (!added) endNote("home_end", `No further rows for this exit — ${homeSeen.size} so far.`);
   } catch (err) {
     fail(err.message);
   } finally {
@@ -254,9 +290,11 @@ async function runSearch() {
     if (uploaded) body.uploaded = uploaded;
     const data = await jsonPost("/api/search", body);
     grid.innerHTML = "";
+    searchSeen = new Set();
+    endNote("search_end", "");
     const videos = data.videos || [];
     if (!videos.length) grid.appendChild(emptyBox(`No videos for “${q}”.`));
-    for (const v of videos) grid.appendChild(videoCard(v));
+    appendNew(grid, videos, searchSeen);
     searchToken = data.continuation || null;
     $("search_more").hidden = !searchToken;
   } catch (err) {
@@ -268,17 +306,26 @@ async function runSearch() {
 async function moreSearch() {
   if (!searchToken) return;
   $("search_more").disabled = true;
+  endNote("search_end", "");
   try {
-    const body = {
-      q: $("q").value.trim(),
-      continuation: searchToken,
-    };
-    const uploaded = $("uploaded").value;
-    if (uploaded) body.uploaded = uploaded;
-    const data = await jsonPost("/api/search", body);
-    for (const v of data.videos || []) $("search_grid").appendChild(videoCard(v));
-    searchToken = data.continuation || null;
-    $("search_more").hidden = !searchToken;
+    // A continuation can come back all-recycled. Walk forward a few pages
+    // rather than making the user press a button that visibly does nothing.
+    let added = 0;
+    for (let hop = 0; hop < MORE_HOPS && searchToken && !added; hop += 1) {
+      const body = { q: $("q").value.trim(), continuation: searchToken };
+      const uploaded = $("uploaded").value;
+      if (uploaded) body.uploaded = uploaded;
+      const data = await jsonPost("/api/search", body);
+      added += appendNew($("search_grid"), data.videos, searchSeen);
+      searchToken = data.continuation || null;
+    }
+    $("search_more").hidden = !searchToken || !added;
+    if (!added) {
+      endNote(
+        "search_end",
+        `That is the end of YouTube’s results for this query here — ${searchSeen.size} videos. Narrow the query or change the upload window for different ones.`,
+      );
+    }
   } catch (err) {
     fail(err.message);
   } finally {
@@ -417,16 +464,23 @@ $("search_more").addEventListener("click", () => moreSearch().catch((err) => fai
 $("related_more").addEventListener("click", () => moreRelated().catch((err) => fail(err.message)));
 $("watch_desc").addEventListener("click", () => $("watch_desc").classList.toggle("open"));
 
-$("country").addEventListener("change", async () => {
+async function applySession(body) {
   try {
-    await jsonPost("/api/session", { gl: $("country").value });
+    await jsonPost("/api/session", body);
     if (!$("view_watch").hidden && currentVideo) await openWatch(currentVideo);
     else if (!$("view_search").hidden) await runSearch();
     else await loadHome();
   } catch (err) {
     fail(err.message);
   }
-});
+}
+
+$("country").addEventListener("change", () => applySession({ gl: $("country").value }));
+
+// "Local titles" asks InnerTube in the market language, which is also how a
+// foreign channel arrives wearing a translated title. "Original titles" asks in
+// English, so every row shows the title its creator typed.
+$("titles").addEventListener("change", () => applySession({ titles: $("titles").value }));
 
 window.addEventListener("popstate", () => {
   skipHist = true;

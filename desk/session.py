@@ -18,8 +18,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Which title YouTube should serve. "original" keeps the title the creator
+# actually typed; "native" asks in the market language, which is what a local
+# viewer sees -- including YouTube's multi-language titles, where a US channel
+# arrives wearing an Arabic title.
+TITLE_MODES = ("original", "native")
+DEFAULT_TITLES = "original"
+# Locale asked of InnerTube in "original" mode. There is no `hl` meaning "do not
+# translate" -- YouTube serves whichever title track matches, and falls back to
+# the creator's own title when none does. `en` is the wrong pick: it hands back
+# the *English* track, so an Arabic channel that uploaded one reads as English.
+# Icelandic has effectively no title tracks, so every row falls back to the
+# original. Ages come back in Icelandic too; `desk.parse` reads and re-renders
+# them (see `display_published`).
+ORIGINAL_HL = "is"
+
+
+def _clean_titles(value) -> str:
+    value = str(value or "").strip().lower()
+    return value if value in TITLE_MODES else DEFAULT_TITLES
+
+
 def _empty() -> dict:
-    return {"gl": "US", "hl": "en", "visitors": {}}
+    return {"gl": "US", "hl": "en", "titles": DEFAULT_TITLES, "visitors": {}}
 
 
 def load() -> dict:
@@ -32,6 +53,7 @@ def load() -> dict:
         return _empty()
     raw.setdefault("gl", "US")
     raw.setdefault("hl", "en")
+    raw["titles"] = _clean_titles(raw.get("titles"))
     raw.setdefault("visitors", {})
     if not isinstance(raw["visitors"], dict):
         raw["visitors"] = {}
@@ -45,10 +67,13 @@ def save(state: dict) -> None:
 
 
 def current() -> dict:
+    """`hl` is the market language. `ui_hl` is what InnerTube is actually asked."""
     state = load()
     country = get_country(state.get("gl") or "US")
     state["gl"] = country["code"]
     state["hl"] = country["hl"]
+    state["titles"] = _clean_titles(state.get("titles"))
+    state["ui_hl"] = ORIGINAL_HL if state["titles"] == "original" else country["hl"]
     return state
 
 
@@ -57,6 +82,13 @@ def set_country(code: str) -> dict:
     country = get_country(code)
     state["gl"] = country["code"]
     state["hl"] = country["hl"]
+    save(state)
+    return state
+
+
+def set_titles(mode: str) -> dict:
+    state = load()
+    state["titles"] = _clean_titles(mode)
     save(state)
     return state
 

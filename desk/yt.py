@@ -9,7 +9,17 @@ from innertube.clients import Client
 
 from desk import tunnel
 from desk.countries import news_query
-from desk.parse import find_token, related_videos, walk_search, walk_videos, watch_info, watch_next_token
+from desk.parse import (
+    apply_upload_floor,
+    display_published,
+    find_token,
+    localize_rows,
+    related_videos,
+    walk_search,
+    walk_videos,
+    watch_info,
+    watch_next_token,
+)
 
 
 class YTError(Exception):
@@ -95,19 +105,29 @@ class YT:
 
     `proxies={}` on the direct path is deliberate: it stops httpx picking up an
     unrelated `HTTPS_PROXY` from the environment behind the desk's back.
+
+    `language` is the market's language -- it picks the cold-start news query and
+    the typeahead. `ui_language` is the locale actually asked of InnerTube, and
+    it decides which *title* YouTube serves: ask in `ar` and a US channel that
+    uploaded an Arabic title track comes back reading as an Arab channel. Ask in
+    `en` and every video keeps the title its creator typed. They are the same
+    value unless the desk is in "original titles" mode.
     """
 
-    def __init__(self, language: str, location: str, pause: float = 0.35):
+    def __init__(self, language: str, location: str, pause: float = 0.35, ui_language: str | None = None):
         lang = language if language not in ("es-419",) else "es"
+        ui = ui_language or lang
+        ui = ui if ui not in ("es-419",) else "es"
         if tunnel.routing_wanted() and not tunnel.proxy_listening(tunnel.proxy_url() or tunnel.DEFAULT_PROXY):
             raise YTError("VPN routing is on but the tunnel proxy is not listening — refusing a leaked home-IP run")
         proxy = tunnel.proxy_url()
         self.proxy = proxy
         self.language = lang
+        self.ui_language = ui
         self.location = location
         self.client = InnerTube(
             "WEB",
-            locale=Locale(lang, location),
+            locale=Locale(ui, location),
             proxies={"all://": proxy} if proxy else {},
         )
         self.client.adaptor.session.timeout = TIMEOUT
@@ -123,6 +143,10 @@ class YT:
 
     def _sleep(self) -> None:
         time.sleep(self.pause)
+
+    def _rows(self, videos: list[dict]) -> list[dict]:
+        """Parsed rows, with dates put back into a language the desk can show."""
+        return localize_rows(videos)
 
     def _call(self, fn, *args, **kwargs):
         last: Exception | None = None
@@ -169,7 +193,9 @@ class YT:
             videos += v
             channels += c
             token = find_token(data)
-        return videos, channels
+        if uploaded:
+            videos = apply_upload_floor(videos, uploaded)
+        return self._rows(videos), channels
 
     def browse(self, browse_id: str, params: str | None = None) -> dict:
         if params:
@@ -208,8 +234,10 @@ class YT:
             params = search_sp(channel=channel, uploaded=uploaded)
             data = self._call(self.client.search, query, params=params)
         videos, channels = walk_search(data)
+        if uploaded:
+            videos = apply_upload_floor(videos, uploaded)
         return {
-            "videos": videos,
+            "videos": self._rows(videos),
             "channels": channels,
             "continuation": find_token(data),
         }
@@ -224,7 +252,7 @@ class YT:
         if continuation:
             data = self.browse_continue(continuation)
             return {
-                "videos": walk_videos(data),
+                "videos": self._rows(walk_videos(data)),
                 "continuation": find_token(data),
                 "empty": False,
                 "source": "trending",
@@ -234,7 +262,7 @@ class YT:
             videos = walk_videos(data)
             if videos:
                 return {
-                    "videos": videos,
+                    "videos": self._rows(videos),
                     "continuation": find_token(data),
                     "empty": False,
                     "source": "trending",
@@ -255,7 +283,7 @@ class YT:
             data = self.browse("FEwhat_to_watch")
         videos = walk_videos(data)
         return {
-            "videos": videos,
+            "videos": self._rows(videos),
             "continuation": find_token(data),
             "empty": not videos and not continuation,
         }
@@ -266,15 +294,16 @@ class YT:
             related = related_videos(data)
             return {
                 "video": {"video_id": video_id},
-                "related": related,
+                "related": self._rows(related),
                 "continuation": watch_next_token(data),
             }
         data = self.next(video_id)
         info = watch_info(data)
         info["video_id"] = video_id
+        info["published"] = display_published(info.get("published"))
         return {
             "video": info,
-            "related": related_videos(data),
+            "related": self._rows(related_videos(data)),
             "continuation": watch_next_token(data),
         }
 
